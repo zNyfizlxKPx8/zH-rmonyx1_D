@@ -144,7 +144,7 @@ storage[panelStorage] = storage[panelStorage] or
 	monstersCount = 3,
 }
 
-macro(100, function()
+macro(2000, function()
 	local target = g_game.getAttackingCreature()
 	if not target then return end
 
