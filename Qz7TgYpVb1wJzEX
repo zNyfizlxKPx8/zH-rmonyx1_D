@@ -192,6 +192,610 @@ for _, scripts in ipairs({storage.ingame_macros, storage.ingame_hotkeys}) do
   end
 end
 
+-- ===============================
+-- SCRIPT NPC TRADE BY UNDERSKY
+-- ===============================
+
+-- Cargar NPCs guardados o usar lista por defecto
+local tradeNpcs = storage.tradeNpcs or {
+  "Rashid", "Yasir", "Grizzly Adams", "Znozel", "Esrik",
+  "Captain Seahorse", "Black Bert", "Willard", "Sandra",
+  "Dario", "Eryn", "Flint", "Isimov", "Lorek", "Sam", "[Magic] Xodet"
+}
+
+-- ===============================
+-- VENTANA PARA AGREGAR NUEVOS NPCs
+-- ===============================
+g_ui.loadUIFromString([[
+AddNpcWindow < MainWindow
+  size: 140 115
+
+  Label
+    id: addNpcTitle
+    text: Agregar NPC
+    font: verdana-11px-rounded
+    color: #00ffff
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: -30
+
+  TextEdit
+    id: npcNameInput
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 25
+    text: ""
+    font: verdana-11px-rounded
+    placeholder: "Nombre del NPC"
+    margin-top: 8
+
+  Button
+    id: addNpcButton
+    text: Agregar
+    font: cipsoftFont
+    height: 23
+    anchors.top: npcNameInput.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+
+  Button
+    id: closeAddWindow
+    text: Cerrar
+    font: cipsoftFont
+    height: 24
+    anchors.top: addNpcButton.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+]])
+
+local addNpcWindow = UI.createWindow('AddNpcWindow', rootWidget)
+addNpcWindow:hide()
+
+-- Agregar NPC a la lista
+addNpcWindow.addNpcButton.onClick = function()
+  local npcName = addNpcWindow.npcNameInput:getText():trim()
+  if npcName ~= "" and not table.find(tradeNpcs, npcName) then
+    table.insert(tradeNpcs, npcName)
+    storage.tradeNpcs = tradeNpcs
+    addNpcWindow.npcNameInput:setText("")
+    g_logger.info("NPC agregado a la lista: " .. npcName)
+  end
+end
+
+-- Boton cerrar ventana de agregar NPC
+addNpcWindow.closeAddWindow.onClick = function()
+  addNpcWindow:hide()
+end
+
+-- Boton flotante para abrir la ventana de agregar NPC
+local openAddNpcButton = UI.Button("NPC Comerciante", function()
+  addNpcWindow:show()
+  addNpcWindow:raise()
+  addNpcWindow:focus()
+end)
+openAddNpcButton:setColor("#00FFFF")
+openAddNpcButton:setWidth(120)
+openAddNpcButton:setHeight(28)
+openAddNpcButton:setFont("verdana-11px-rounded")
+
+-- Animacion de brillo para el titulo
+local titleLabel = addNpcWindow.addNpcTitle
+local text = "Agregar NPC"
+local glowPosition = 1
+local glowDirection = 1
+
+macro(50, function()
+  local numChars = #text
+  local glowRange = math.max(1, math.floor(numChars / 10))
+  local coloredText = {}
+
+  for i = 1, numChars do
+    local char = text:sub(i, i)
+    local color = "#00FFFF" -- Color base
+    if math.abs(i - glowPosition) <= glowRange then
+      color = "#BFFFFF" -- Color de brillo
+    end
+    table.insert(coloredText, char)
+    table.insert(coloredText, color)
+  end
+
+  glowPosition = glowPosition + glowDirection
+  if glowPosition > numChars then
+    glowPosition = numChars - 1
+    glowDirection = -1
+  elseif glowPosition < 1 then
+    glowPosition = 2
+    glowDirection = 1
+  end
+
+  if titleLabel then
+    titleLabel:setColoredText(coloredText)
+  end
+end)
+
+-- ==========================
+-- VENTANA AUTO DE TRADE/HI
+-- ==========================
+g_ui.loadUIFromString([[
+TradeWindow < MainWindow
+  size: 140 117
+
+  Label
+    id: tradeTitle
+    text: NPC Comerciante
+    font: verdana-11px-rounded
+    color: #00ffff
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: -30
+
+  Panel
+    id: tradeOptions
+    anchors.top: tradeTitle.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: tradeClose.top
+    margin-top: 10
+    layout:
+      type: verticalBox
+
+  Button
+    id: tradeClose
+    text: Cerrar
+    font: cipsoftFont
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: -8
+    margin-bottom: -8
+    size: 60 23
+]])
+
+local tradeWindow = UI.createWindow('TradeWindow', rootWidget)
+tradeWindow:hide()
+
+-- Botones: Saludar y Trade
+local hiButton = g_ui.createWidget("Button", tradeWindow.tradeOptions)
+hiButton:setText("Saludar")
+hiButton:setFont("cipsoftFont")
+hiButton:setWidth(120)
+hiButton.onClick = function()
+  say("hi")
+end
+
+local tradeButton = g_ui.createWidget("Button", tradeWindow.tradeOptions)
+tradeButton:setText("Trade")
+tradeButton:setFont("cipsoftFont")
+tradeButton:setWidth(120)
+tradeButton:setMarginTop(4) -- <-- separacion de 4 pixeles respecto al boton "Saludar"
+tradeButton.onClick = function()
+  NPC.say("trade")
+end
+
+-- Boton cerrar ventana de trade
+tradeWindow.tradeClose.onClick = function()
+  tradeWindow:hide()
+end
+
+-- ==========================
+-- DETECCION AUTOMATICA NPCs
+-- ==========================
+local currentNpc = nil
+local isTradeVisible = false
+
+macro(200, function()
+  local npcFound
+  for _, name in ipairs(tradeNpcs) do
+    local npc = getCreatureByName(name)
+    if npc and getDistanceBetween(pos(), npc:getPosition()) <= 3 then
+      npcFound = npc
+      break
+    end
+  end
+
+  if npcFound and not isTradeVisible then
+    currentNpc = npcFound:getName()
+    tradeWindow:show()
+    tradeWindow:raise()
+    tradeWindow:focus()
+    isTradeVisible = true
+  elseif not npcFound and isTradeVisible then
+    tradeWindow:hide()
+    isTradeVisible = false
+    currentNpc = nil
+  end
+end)
+
+-- Animacion de brillo para el titulo
+local titleLabel = tradeWindow.tradeTitle
+local text = "NPC Comerciante"
+local glowPosition = 1
+local glowDirection = 1
+
+macro(50, function()
+  local numChars = #text
+  local glowRange = math.max(1, math.floor(numChars / 10))
+  local coloredText = {}
+
+  for i = 1, numChars do
+    local char = text:sub(i, i)
+    local color = "#00FFFF" -- Color base
+    if math.abs(i - glowPosition) <= glowRange then
+      color = "#BFFFFF" -- Color de brillo
+    end
+    table.insert(coloredText, char)
+    table.insert(coloredText, color)
+  end
+
+  glowPosition = glowPosition + glowDirection
+  if glowPosition > numChars then
+    glowPosition = numChars - 1
+    glowDirection = -1
+  elseif glowPosition < 1 then
+    glowPosition = 2
+    glowDirection = 1
+  end
+
+  if titleLabel then
+    titleLabel:setColoredText(coloredText)
+  end
+end)
+
+-- ===============================
+-- SCRIPT NPC TASK BY UNDERSKY
+-- ===============================
+-- Lista de NPCs De Tareas
+local tradeNpcs = { "[Daily Challenge] Champion", "[Daily Task] Slayer", "[Daily Task] Shaman" }
+
+-- Crear la interfaz tipo ventana personalizada
+g_ui.loadUIFromString([[
+TradeWindow < MainWindow
+  size: 130 325
+
+  Label
+    id: tradeTitle
+    text: NPC Tasker
+    font: verdana-11px-rounded
+    color: #00ffff
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: -30
+
+  Panel
+    id: tradeOptions
+    anchors.fill: parent
+    anchors.bottom: tradeClose.top
+    layout:
+      type: verticalBox
+      padding: 5
+      spacing: 6
+
+  Button
+    id: tradeClose
+    text: Cerrar
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-left: 90
+    margin-bottom: -8
+    size: 45 23
+]])
+
+local tradeWindow = UI.createWindow('TradeWindow', rootWidget)
+tradeWindow:hide()
+
+-- Funciones de dialogo
+local function askTask()
+  NPC.say("Hi")  
+  schedule(1500, function() NPC.say("task") end)
+  schedule(2500, function() NPC.say("custom") end)
+  schedule(3500, function() NPC.say("long") end)
+end
+
+local function askTaskExp()
+  NPC.say("hi")  
+  schedule(1500, function() NPC.say("task") end)
+  schedule(2500, function() NPC.say("yes") end)
+  schedule(3500, function() NPC.say("experience") end)
+  schedule(4500, function() NPC.say("yes") end)
+end
+
+local function askTaskGold()
+  NPC.say("hi")  
+  schedule(1500, function() NPC.say("task") end)
+  schedule(2500, function() NPC.say("yes") end)
+  schedule(3500, function() NPC.say("gold") end)
+  schedule(4500, function() NPC.say("yes") end)
+end
+
+local function askTaskCancel()
+  NPC.say("hi")  
+  schedule(2500, function() NPC.say("cancel") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askTaskShort()
+  NPC.say("hi")  
+  schedule(1500, function() NPC.say("yes") end)
+  schedule(2500, function() NPC.say("short") end)
+end
+
+local function askTaskNormal()
+  NPC.say("hi")  
+  schedule(1500, function() NPC.say("yes") end)
+  schedule(2500, function() NPC.say("normal") end)
+end
+
+local function askTaskLong()
+  NPC.say("hi")  
+  schedule(1500, function() NPC.say("yes") end)
+  schedule(2500, function() NPC.say("long") end)
+end
+
+-- Crear botones
+local function createButton(text, callback)
+  local btn = g_ui.createWidget("Button", tradeWindow.tradeOptions)
+  btn:setText(text)
+  btn:setFont("cipsoftFont")
+  btn:setWidth(120)
+  btn.onClick = callback
+end
+
+createButton("Hi", function() say("hi") end)
+createButton("Trade", function() NPC.say("trade") end)
+createButton("Task (custom)", askTask)
+createButton("Task (exp)", askTaskExp)
+createButton("Task (gold)", askTaskGold)
+createButton("Cancel task", askTaskCancel)
+createButton("Task short", askTaskShort)
+createButton("Task normal", askTaskNormal)
+createButton("Task long", askTaskLong)
+
+-- Boton cerrar
+tradeWindow.tradeClose.onClick = function()
+  tradeWindow:hide()
+end
+
+-- Logica de deteccion del NPC cercano
+local currentNpc = nil
+local isTradeVisible = false
+
+macro(200, function()
+  local npcFound
+  for _, name in ipairs(tradeNpcs) do
+    local npc = getCreatureByName(name)
+    if npc and getDistanceBetween(pos(), npc:getPosition()) <= 3 then
+      npcFound = npc
+      break
+    end
+  end
+
+  if npcFound and not isTradeVisible then
+    currentNpc = npcFound:getName()
+    tradeWindow:show()
+    tradeWindow:raise()
+    tradeWindow:focus()
+    isTradeVisible = true
+  elseif not npcFound and isTradeVisible then
+    tradeWindow:hide()
+    isTradeVisible = false
+    currentNpc = nil
+  end
+end)
+
+-- Animacion de brillo para el titulo
+local titleLabel = tradeWindow.tradeTitle
+local text = "NPC Tasker"
+local glowPosition = 1
+local glowDirection = 1
+
+macro(50, function()
+  local numChars = #text
+  local glowRange = math.max(1, math.floor(numChars / 10))
+  local coloredText = {}
+
+  for i = 1, numChars do
+    local char = text:sub(i, i)
+    local color = "#00FFFF" -- Color base
+    if math.abs(i - glowPosition) <= glowRange then
+      color = "#BFFFFF" -- Color de brillo
+    end
+    table.insert(coloredText, char)
+    table.insert(coloredText, color)
+  end
+
+  glowPosition = glowPosition + glowDirection
+  if glowPosition > numChars then
+    glowPosition = numChars - 1
+    glowDirection = -1
+  elseif glowPosition < 1 then
+    glowPosition = 2
+    glowDirection = 1
+  end
+
+  if titleLabel then
+    titleLabel:setColoredText(coloredText)
+  end
+end)
+
+-- ===============================
+-- SCRIPT NPC BOOSTS BY UNDERSKY
+-- ===============================
+-- Lista de NPCs con boosts
+local boostNpcs = { "[Free] Experience booster" }
+
+-- UI
+g_ui.loadUIFromString([[
+BoostWindow < MainWindow
+  size: 140 268
+
+  Label
+    id: boostTitle
+    text: NPC Boosts
+    font: verdana-11px-rounded
+    color: #00FFFF
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: -30
+
+  Panel
+    id: boostOptions
+    anchors.fill: parent
+    anchors.bottom: boostClose.top
+    layout:
+      type: verticalBox
+      padding: 5
+      spacing: 6
+
+  Button
+    id: boostClose
+    text: Cerrar
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-left: 90
+    margin-bottom: -8
+    size: 45 23
+]])
+-- Free Boosts By Undersky
+local boostWindow = UI.createWindow('BoostWindow', rootWidget)
+boostWindow:hide()
+
+-- Funciones de dialogo Boost
+local function askBoostDistance()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("distance") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askBoostSword()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("sword") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askBoostClub()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("club") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askBoostAxe()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("axe") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askBoostExp()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("level") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askBoostMl()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("magic") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+local function askBoostShield()
+  NPC.say("Hi")
+  schedule(1500, function() NPC.say("boosts") end)
+  schedule(2500, function() NPC.say("shield") end)
+  schedule(3500, function() NPC.say("yes") end)
+end
+
+-- Botones
+local function createButton(text, callback)
+  local btn = g_ui.createWidget("Button", boostWindow.boostOptions)
+  btn:setText(text)
+  btn:setFont("cipsoftFont")
+  btn:setWidth(120)
+  btn.onClick = callback
+end
+
+createButton("Boost Distance", askBoostDistance)
+createButton("Boost Sword", askBoostSword)
+createButton("Boost Club", askBoostClub)
+createButton("Boost Axe", askBoostAxe)
+createButton("Boost Exp", askBoostExp)
+createButton("Boost ML", askBoostMl)
+createButton("Boost Shield", askBoostShield)
+
+-- Cerrar ventana
+boostWindow.boostClose.onClick = function()
+  boostWindow:hide()
+end
+
+-- Mostrar ventana cerca del NPC
+local isBoostVisible = false
+
+macro(200, function()
+  local npcFound
+  for _, name in ipairs(boostNpcs) do
+    local npc = getCreatureByName(name)
+    if npc and getDistanceBetween(pos(), npc:getPosition()) <= 1 then
+      npcFound = npc
+      break
+    end
+  end
+
+  if npcFound and not isBoostVisible then
+    boostWindow:show()
+    boostWindow:raise()
+    boostWindow:focus()
+    isBoostVisible = true
+  elseif not npcFound and isBoostVisible then
+    boostWindow:hide()
+    isBoostVisible = false
+  end
+end)
+
+-- Animacion de brillo para el titulo
+local titleLabel = boostWindow.boostTitle
+local text = "NPC Boosts"
+local glowPosition = 1
+local glowDirection = 1
+
+macro(50, function()
+  local numChars = #text
+  local glowRange = math.max(1, math.floor(numChars / 10))
+  local coloredText = {}
+
+  for i = 1, numChars do
+    local char = text:sub(i, i)
+    local color = "#00FFFF" -- Color base
+    if math.abs(i - glowPosition) <= glowRange then
+      color = "#BFFFFF" -- Color de brillo
+    end
+    table.insert(coloredText, char)
+    table.insert(coloredText, color)
+  end
+
+  glowPosition = glowPosition + glowDirection
+  if glowPosition > numChars then
+    glowPosition = numChars - 1
+    glowDirection = -1
+  elseif glowPosition < 1 then
+    glowPosition = 2
+    glowDirection = 1
+  end
+
+  if titleLabel then
+    titleLabel:setColoredText(coloredText)
+  end
+end)
+-- ===============================
+-- SCRIPT CREADO BY UNDERSKY
+-- ===============================
+
 -- Girar Script creado por Madgenius
 local actionUI = setupUI([[
 Panel
@@ -203,7 +807,7 @@ Panel
     anchors.left: parent.left
     anchors.right: parent.right
     margin-left: 1
-    height: 18
+    height: 20
     text: Girar Hacia 
 ]], parent)
 
